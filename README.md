@@ -34,7 +34,19 @@ sudo apt-get install libzbar0
 8. Centang kembali "Nyalakan Scanner". Aliran video (stream) dari HP kamu sekarang akan langsung masuk dengan mulus!
 
 ## 📡 Dokumentasi REST API
-Sistem ini menjalankan background thread API yang bisa diakses secara lokal.
-Endpoint: GET /api/resi
-URL Lokal: http://localhost:5000/api/resi
-Response Output:
+* Sistem ini menjalankan background thread API yang bisa diakses secara lokal.
+* Endpoint: GET /api/resi
+* URL Lokal: http://localhost:5000/api/resi
+* Response Output:
+```
+{
+  "status": "success",
+  "total_paket": 2,
+  "data": [
+    {
+      "nomor_resi": "JP123456789",
+      "waktu_scan": "2026-05-24 13:15:22"
+    }
+  ]
+}
+```
