@@ -22,16 +22,17 @@ Jika menjalankan sistem ini di lingkungan server berbasis Linux (seperti Hugging
 sudo apt-get install libzbar0
 ```
 
-## Cara Kerja Aplikasi:
-1. Di terminal exec 
-    - python -m streamlit run main.py
-2. Pastikan checkbox "Nyalakan Scanner" dalam keadaan mati.
-3. Pilih "Video Demo". Untuk mencoba hasil scan dari Video Sampel
-4. Centang "Nyalakan Scanner". Video MP4 akan berputar.
-5. Matikan centang "Nyalakan Scanner". Video akan berhenti.
-6. Pindah radio button ke "Kamera HP".
-7. Ketik URL IP Webcam yang valid dari HP kamu. Install Aplikasi IP Webcam di playstore, buka lalu disana akan ada IP alamat stream. Masukan ke browser dan Start Server dan lakukan scan paket secara mandiri.
-8. Centang kembali "Nyalakan Scanner". Aliran video (stream) dari HP kamu sekarang akan langsung masuk dengan mulus!
+## Cara Kerja Aplikasi: 
+* Clone repositori ini: https://github.com/akbarsyidiqi/konveyor-apps
+* Instal dependensi Python: pip install -r requirements.txt
+* Di terminal exec: python -m streamlit run main.py
+* Pastikan checkbox "Nyalakan Scanner" dalam keadaan mati.
+* Pilih "Video Demo". Untuk mencoba hasil scan dari Video Sampel
+* Centang "Nyalakan Scanner". Video MP4 akan berputar.
+* Matikan centang "Nyalakan Scanner". Video akan berhenti.
+* Pindah radio button ke "Kamera HP".
+* Ketik URL IP Webcam yang valid dari HP kamu. Install Aplikasi IP Webcam di playstore, buka lalu disana akan ada IP alamat stream. Masukan ke browser dan Start Server dan lakukan scan paket secara mandiri.
+* Centang kembali "Nyalakan Scanner". Aliran video (stream) dari HP kamu sekarang akan langsung masuk dengan mulus!
 
 ## 📡 Dokumentasi REST API
 * Sistem ini menjalankan background thread API yang bisa diakses secara lokal.
