@@ -26,7 +26,8 @@ sudo apt-get install libzbar0
 * Clone repositori ini: https://github.com/akbarsyidiqi/konveyor-apps
 * Instal dependensi Python: pip install -r requirements.txt
 * Di terminal exec: python -m streamlit run main.py
-* Pastikan checkbox "Nyalakan Scanner" dalam keadaan mati.
+* lalu browser akan membuka halaman http://localhost:8501/ ini adalah UI Aplikasi Utama
+* SOP: Matikan centang Nyalakan Scanner (uncheck) terlebih dahulu sebelum mengganti sumber video/URL.
 * Pilih "Video Demo". Untuk mencoba hasil scan dari Video Sampel
 * Centang "Nyalakan Scanner". Video MP4 akan berputar.
 * Matikan centang "Nyalakan Scanner". Video akan berhenti.
