@@ -1,0 +1,7 @@
+opencv-python-headless
+numpy
+ultralytics
+pyzbar
+streamlit
+pandas
+Flask
