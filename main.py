@@ -9,6 +9,7 @@ import sqlite3
 import pandas as pd
 import threading
 from flask import Flask, jsonify
+import time
 
 # ==========================================
 # 1. INISIALISASI DATABASE (SQLite)
@@ -140,7 +141,9 @@ with col2:
     # Indikator Total Paket Real-time dari Database
     total_placeholder = st.empty()
     total_placeholder.metric(label="Total Paket di Database", value=get_total_packages())
-    
+    # --- TAMBAHKAN INI: Placeholder untuk FPS tulisan kecil ---
+    fps_small_display = st.empty() 
+    # ---------------------------------------------------------
     st.markdown("---")
     st.write("🔧 **Menu Administrasi Data**")
     
@@ -156,8 +159,8 @@ with col2:
         conn = sqlite3.connect("logistik_gudang.db")
         df = pd.read_sql_query("""
             SELECT id AS 'No', 
-                   barcode_data AS 'Nomor Resi', 
-                   scanned_at AS 'Waktu Pemindaian' 
+                barcode_data AS 'Nomor Resi', 
+                scanned_at AS 'Waktu Pemindaian' 
             FROM scanned_packages 
             ORDER BY scanned_at DESC
         """, conn)
@@ -175,7 +178,6 @@ with col2:
         mime="text/csv",
         key="download-csv"
     )
-
     st.markdown("---")
     st.write("📋 **Daftar Resi Terscan (Real-Time)**")
     
@@ -226,6 +228,7 @@ if run_scanner:
 
     # Karena sudah di dalam blok 'if run_scanner', while loop-nya cukup mengecek cap.isOpened()
     while cap.isOpened():
+        start_time = time.time() # 1. Catat waktu mulai
         ret, frame = cap.read()
         
         if not ret:
@@ -291,6 +294,17 @@ if run_scanner:
                                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2)
                     # --- PROSES BARCODE SELESAI ---
 
+        # Hitung durasi (berapa detik yang dihabiskan untuk memproses 1 frame)
+        process_time = time.time() - start_time
+        
+        # Menghindari pembagian dengan nol
+        if process_time > 0:
+            fps = 1 / process_time
+        else:
+            fps = 0
+            
+        fps_small_display.caption(f"Kecepatan deteksi: {fps:.2f} FPS")
+        
         # Tampilkan ke UI
         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         frame_window.image(frame_rgb, width='stretch')
