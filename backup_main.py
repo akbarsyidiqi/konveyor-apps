@@ -7,6 +7,9 @@ import streamlit as st
 import time
 import sqlite3
 import pandas as pd
+import threading
+from flask import Flask, jsonify
+import time
 
 # ==========================================
 # 1. INISIALISASI DATABASE (SQLite)
@@ -50,6 +53,37 @@ def get_total_packages():
     conn.close()
     return total
 
+# Jalankan inisialisasi DB saat aplikasi pertama kali dimuat
+init_db()
+
+# ==========================================
+# 2. SEEDING BACKEND REST API (Flask Thread)
+# ==========================================
+api_app = Flask(__name__)
+
+@api_app.route('/api/resi', methods=['GET'])
+def get_scanned_resi():
+    try:
+        conn = sqlite3.connect("logistik_gudang.db")
+        cursor = conn.cursor()
+        cursor.execute("SELECT barcode_data, scanned_at FROM scanned_packages ORDER BY scanned_at DESC")
+        rows = cursor.fetchall()
+        conn.close()
+        
+        list_resi = [{"nomor_resi": row[0], "waktu_scan": row[1]} for row in rows]
+        
+        return jsonify({
+            "status": "success",
+            "total_paket": len(list_resi),
+            "data": list_resi
+        }), 200
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+def run_flask_api():
+    # Menjalankan API di port 5000 secara independen
+    api_app.run(host='0.0.0.0', port=5000, debug=False, use_reloader=False)
+
 def reset_db():
     conn = sqlite3.connect("logistik_gudang.db")
     cursor = conn.cursor()
@@ -58,11 +92,13 @@ def reset_db():
     conn.commit()
     conn.close()
 
-# Jalankan inisialisasi DB saat aplikasi pertama kali dimuat
-init_db()
+# Jalankan Flask API di background thread agar tidak memblokir Streamlit
+if 'api_thread_started' not in st.session_state:
+    threading.Thread(target=run_flask_api, daemon=True).start()
+    st.session_state.api_thread_started = True
 
 # ==========================================
-# 2. ANTARMUKA UTAMA (Streamlit UI)
+# 3. ANTARMUKA UTAMA (Streamlit UI)
 # ==========================================
 st.set_page_config(page_title="Smart Conveyor Scanner", layout="wide")
 
@@ -86,7 +122,7 @@ with col1:
     
     url_kamera_hp = ""
     if sumber_video == "Kamera HP (URL Stream)":
-        # Dummy IP
+        # Saya ubah dummy IP-nya agar formatnya lebih realistis
         url_kamera_hp = st.text_input(
             "🔗 Masukkan URL Video dari HP:", 
             value="http://192.168.1.5:8080/video" 
@@ -105,14 +141,14 @@ with col2:
     # Indikator Total Paket Real-time dari Database
     total_placeholder = st.empty()
     total_placeholder.metric(label="Total Paket di Database", value=get_total_packages())
-    # Placeholder untuk FPS tulisan kecil
+    # --- TAMBAHKAN INI: Placeholder untuk FPS tulisan kecil ---
     fps_small_display = st.empty() 
-    
+    # ---------------------------------------------------------
     st.markdown("---")
     st.write("🔧 **Menu Administrasi Data**")
     
-    # Tombol Reset
-    if st.button("🔴 Kosongkan Semua Data (Reset)", type="primary", width='stretch'):
+    # ---- TAMBAHKAN TOMBOL RESET DI SINI ----
+    if st.button("🔴 Kosongkan Semua Data (Reset)", type="primary", width="stretch"):
         reset_db()
         st.success("Database berhasil dikosongkan!")
         time.sleep(1)
@@ -140,8 +176,7 @@ with col2:
         data=csv_data,
         file_name=f"laporan_resi_gudang_{time.strftime('%Y%m%d_%H%M%S')}.csv",
         mime="text/csv",
-        key="download-csv",
-        width='stretch'
+        key="download-csv"
     )
     st.markdown("---")
     st.write("📋 **Daftar Resi Terscan (Real-Time)**")
@@ -151,22 +186,32 @@ with col2:
     
     # Isi wadah tersebut dengan data awal saat aplikasi baru dibuka
     df_current = fetch_data_for_csv()
-    table_placeholder.dataframe(df_current, width='stretch', hide_index=True)
+    table_placeholder.dataframe(df_current, width="stretch", hide_index=True)
     
     st.write("🔍 **Kotak Intip Scanner (Otsu)**")
     debug_image_window = st.image([], width='stretch')
 
 # ==========================================
-# 3. CORE PROCESSING LOOP (OpenCV + Vision)
+# 4. CORE PROCESSING LOOP (OpenCV + Vision)
 # ==========================================
+# Menggunakan kamera bawaan/IP Webcam (0 = default webcam)
+# Install ip webcam di playstore, lalu buka ip webcam dan start server untuk mulai stream video 
+# ambil ip webcam tertera masukan ke bawah ini
 
+
+# ==========================================
+# 4. CORE PROCESSING LOOP (OpenCV + Vision)
+# ==========================================
+# ip dari aplikasi ip webcam dr HP, jika mau scan live 
+# sumber_video = "http://192.168.1.5:8080/video"
+# Tentukan sumber berdasarkan pilihan st.radio di atas
+# Tentukan sumber berdasarkan pilihan di atas
 # Kamera HANYA diinisialisasi jika checkbox menyala
 if run_scanner:
     if sumber_video == "Kamera HP (URL Stream)":
         video_source = url_kamera_hp
     else:
-        #video_source = "video-resi-jarak-30cm.mp4" 
-        video_source = "video-resi-jarak-20cm-lebih-cepat.mp4"
+        video_source = "demo_video.mp4" 
 
     cap = cv2.VideoCapture(video_source)
 
@@ -181,11 +226,13 @@ if run_scanner:
     # Angka 3 artinya kita hanya memproses 1 dari setiap 3 frame
     frame_skip = 3
 
+    # Karena sudah di dalam blok 'if run_scanner', while loop-nya cukup mengecek cap.isOpened()
     while cap.isOpened():
-        start_time = time.time() # Catat waktu mulai
+        start_time = time.time() # 1. Catat waktu mulai
         ret, frame = cap.read()
         
         if not ret:
+            # ... (kode jika video selesai, tetap sama) ...
             break
 
         frame_count += 1
@@ -217,7 +264,7 @@ if run_scanner:
                     gray = cv2.cvtColor(cropped_package, cv2.COLOR_BGR2GRAY)
                     _, thresholded = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
                     
-                    debug_image_window.image(thresholded, caption="Kamera Intip Scanner")
+                    debug_image_window.image(thresholded, caption="Kamera Intip Scanner", width='stretch')
 
                     simbol_logistik = [
                         ZBarSymbol.CODE128, ZBarSymbol.CODE39, ZBarSymbol.EAN13, 
@@ -240,7 +287,7 @@ if run_scanner:
                             total_placeholder.metric(label="Total Paket di Database", value=get_total_packages())
                             # Update tabel
                             df_updated = fetch_data_for_csv()
-                            table_placeholder.dataframe(df_updated, width='stretch', hide_index=True)
+                            table_placeholder.dataframe(df_updated, width="stretch", hide_index=True)
                         
                         cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 0, 0), 4)
                         cv2.putText(frame, f"SUCCESS: {barcode_data}", (x1, y1 - 30), 
@@ -260,7 +307,7 @@ if run_scanner:
         
         # Tampilkan ke UI
         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        frame_window.image(frame_rgb)
+        frame_window.image(frame_rgb, width='stretch')
 
     cap.release()
 else:

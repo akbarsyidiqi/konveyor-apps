@@ -6,7 +6,6 @@ Sistem prototipe otomasi penyortiran logistik berbasis AI (Computer Vision) untu
 * **AI Object Detection:** Menggunakan model YOLOv8 untuk mendeteksi region paket/kardus (mengabaikan *background* visual yang tidak perlu).
 * **Robust Barcode Scanning:** Terintegrasi dengan PyZbar dan filter binarisasi Otsu's Thresholding untuk membaca resi di berbagai tingkat pencahayaan (termasuk pada paket berwarna hitam).
 * **Data Persistence:** Penyimpanan data nomor resi secara persisten menggunakan SQLite untuk mencegah duplikasi *scan*.
-* **REST API Terintegrasi:** Dilengkapi *background service* menggunakan Flask untuk mengekspos data *scan* ke sistem operasional gudang lainnya.
 * **Real-time Dashboard & Export:** Antarmuka pemantauan *real-time* berbasis Streamlit yang dilengkapi fitur unduh data ke format CSV.
 
 ## 🛠️ Teknologi yang Digunakan
@@ -34,21 +33,3 @@ sudo apt-get install libzbar0
 * Pindah radio button ke "Kamera HP".
 * Ketik URL IP Webcam yang valid dari HP kamu. Install Aplikasi IP Webcam di playstore, buka lalu disana akan ada IP alamat stream. Masukan ke browser dan Start Server dan lakukan scan paket secara mandiri.
 * Centang kembali "Nyalakan Scanner". Aliran video (stream) dari HP kamu sekarang akan langsung masuk dengan mulus!
-
-## 📡 Dokumentasi REST API
-* Sistem ini menjalankan background thread API yang bisa diakses secara lokal.
-* Endpoint: GET /api/resi
-* URL Lokal: http://localhost:5000/api/resi
-* Response Output:
-```
-{
-  "status": "success",
-  "total_paket": 2,
-  "data": [
-    {
-      "nomor_resi": "JP123456789",
-      "waktu_scan": "2026-05-24 13:15:22"
-    }
-  ]
-}
-```

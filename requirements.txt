@@ -4,4 +4,3 @@ ultralytics
 pyzbar
 streamlit
 pandas
-Flask
