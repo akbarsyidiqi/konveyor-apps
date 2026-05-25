@@ -112,7 +112,7 @@ with col2:
     st.write("🔧 **Menu Administrasi Data**")
     
     # Tombol Reset
-    if st.button("🔴 Kosongkan Semua Data (Reset)", type="primary", use_container_width=True):
+    if st.button("🔴 Kosongkan Semua Data (Reset)", type="primary", width='stretch'):
         reset_db()
         st.success("Database berhasil dikosongkan!")
         time.sleep(1)
@@ -141,7 +141,7 @@ with col2:
         file_name=f"laporan_resi_gudang_{time.strftime('%Y%m%d_%H%M%S')}.csv",
         mime="text/csv",
         key="download-csv",
-        use_container_width=True
+        width='stretch'
     )
     st.markdown("---")
     st.write("📋 **Daftar Resi Terscan (Real-Time)**")
@@ -151,7 +151,7 @@ with col2:
     
     # Isi wadah tersebut dengan data awal saat aplikasi baru dibuka
     df_current = fetch_data_for_csv()
-    table_placeholder.dataframe(df_current, use_container_width=True, hide_index=True)
+    table_placeholder.dataframe(df_current, width='stretch', hide_index=True)
     
     st.write("🔍 **Kotak Intip Scanner (Otsu)**")
     debug_image_window = st.image([], width='stretch')
@@ -239,7 +239,7 @@ if run_scanner:
                             total_placeholder.metric(label="Total Paket di Database", value=get_total_packages())
                             # Update tabel
                             df_updated = fetch_data_for_csv()
-                            table_placeholder.dataframe(df_updated, use_container_width=True, hide_index=True)
+                            table_placeholder.dataframe(df_updated, width='stretch', hide_index=True)
                         
                         cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 0, 0), 4)
                         cv2.putText(frame, f"SUCCESS: {barcode_data}", (x1, y1 - 30), 
