@@ -166,9 +166,14 @@ if run_scanner:
         video_source = url_kamera_hp
     else:
         #video_source = "video-resi-jarak-30cm.mp4" 
-        video_source = "video-resi-jarak-20cm-lebih-cepat.mp4"
+        video_source = "video-resi-jarak-30cm-terbaca-semua.mp4"
 
     cap = cv2.VideoCapture(video_source)
+
+    # 💾 BUFFER MEMORI: Menyimpan resi yang sudah sukses dipindai di sesi ini
+    # agar tidak discan ulang secara terus menerus
+    if 'resi_terscan_cache' not in st.session_state:
+        st.session_state.resi_terscan_cache = set()
 
     # Sapu bersih "cache visual" atau sisa gambar hantu dari sesi sebelumnya 
     # tepat sebelum video baru diputar
@@ -230,18 +235,38 @@ if run_scanner:
                         barcodes = pyzbar.decode(gray, symbols=simbol_logistik)
                     
                     # --- PROSES BARCODE MULAI DI SINI ---
+                    import re
+
                     for barcode in barcodes:
-                        barcode_data = barcode.data.decode("utf-8")
+                        barcode_data = barcode.data.decode("utf-8").strip()
                         
+                        # 🔍 1. Validasi Panjang Karakter (Filter Port Code)
+                        if len(barcode_data) < 10:
+                            # Ini Port Code, abaikan
+                            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
+                            continue
+                        
+                        # 🛑 2. Validasi Duplikasi: Jika resi sudah pernah terscan di sesi ini, LANGSUNG SKIP
+                        if barcode_data in st.session_state.resi_terscan_cache:
+                            # Beri penanda visual tipis bahwa paket ini sudah diproses (Optional)
+                            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 255), 2) # Kotak Kuning = Sudah Terdata
+                            cv2.putText(frame, "SUDAH TERDATA (SKIP)", (x1, y1 - 10), 
+                                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
+                            continue  # <--- Melompat langsung ke barcode/paket berikutnya
+                        
+                        # 💾 3. Jika resi BARU, masukkan ke database
                         is_new = save_barcode_to_db(barcode_data)
                         
                         if is_new:
-                            # Update metrik angka
+                            # Masukkan ke dalam buffer memori agar tidak diproses lagi di frame selanjutnya
+                            st.session_state.resi_terscan_cache.add(barcode_data)
+                            
+                            # Update metrik angka & tabel di UI Streamlit
                             total_placeholder.metric(label="Total Paket di Database", value=get_total_packages())
-                            # Update tabel
                             df_updated = fetch_data_for_csv()
                             table_placeholder.dataframe(df_updated, width='stretch', hide_index=True)
                         
+                        # Efek Visual untuk Resi yang BARU SUKSES TERSCAN
                         cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 0, 0), 4)
                         cv2.putText(frame, f"SUCCESS: {barcode_data}", (x1, y1 - 30), 
                                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2)
