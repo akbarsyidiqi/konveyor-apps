@@ -211,7 +211,8 @@ if run_scanner:
     if sumber_video == "Kamera HP (URL Stream)":
         video_source = url_kamera_hp
     else:
-        video_source = "demo_video.mp4" 
+        #video_source = "video-resi-jarak-30cm.mp4" 
+        video_source = "video-resi-jarak-20cm-lebih-cepat.mp4"
 
     cap = cv2.VideoCapture(video_source)
 
