@@ -165,7 +165,7 @@ if run_scanner:
     if sumber_video == "Kamera HP (URL Stream)":
         video_source = url_kamera_hp
     else:
-        #video_source = "video-resi-jarak-30cm.mp4" 
+        #video_source = "putih.mp4" 
         video_source = "video-resi-jarak-30cm-terbaca-semua.mp4"
 
     cap = cv2.VideoCapture(video_source)
@@ -194,6 +194,9 @@ if run_scanner:
             break
 
         frame_count += 1
+
+        if sumber_video == "Video Demo di Repo (MP4)":
+            frame_skip = 30
         
         # JIKA BUKAN KELIPATAN FRAME_SKIP, LEWATI DETEKSI!
         if frame_count % frame_skip != 0:
@@ -201,9 +204,14 @@ if run_scanner:
             
         if sumber_video == "Video Demo di Repo (MP4)":
             time.sleep(0.01) # Kurangi delay sleep jika masih terlalu lambat
-        
-        # Deteksi objek menggunakan YOLO
-        results = model(frame, verbose=False)
+            
+            # Gunakan parameter ringan (imgsz=320) untuk video agar cepat
+            results = model(frame, conf=0.6, imgsz=320, verbose=False)
+            
+        else:
+            # Ini akan berjalan jika sumbernya "Kamera HP (URL Stream)"
+            # Gunakan resolusi bawaan model
+            results = model(frame, verbose=False)
     
         for r in results:
             boxes = r.boxes
