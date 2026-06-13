@@ -1,5 +1,6 @@
 import cv2
 import numpy as np
+from ultralytics import YOLO
 from pyzbar import pyzbar
 from pyzbar.pyzbar import ZBarSymbol
 import streamlit as st
@@ -10,6 +11,10 @@ import pandas as pd
 # ==========================================
 # 1. INISIALISASI DATABASE (SQLite)
 # ==========================================
+
+# Menghapus seluruh cache data dan cache resource di Streamlit
+# st.cache_data.clear()
+# st.cache_resource.clear()
 
 def init_db():
     conn = sqlite3.connect("logistik_gudang.db")
@@ -62,13 +67,20 @@ init_db()
 st.set_page_config(page_title="Smart Conveyor Scanner", layout="wide")
 
 st.title("📦 Smart Conveyor Barcode Scanner System")
-st.write("Sistem Pemindaian Paket Otomatis Berbasis Computer Vision (ROI + PyZbar + SQLite)")
+st.write("Sistem Pemindaian Paket Otomatis Berbasis AI (YOLOv8 + PyZbar + SQLite)")
+
+# Load Model YOLOv8 (Pastikan file best.pt hasil Roboflow ada di folder yang sama)
+@st.cache_resource
+def load_yolo_model():
+    return YOLO("best.pt")
+
+model = load_yolo_model()
 
 # Layout Kolom Dashboard
 col1, col2 = st.columns([2, 1])
 
 with col1:
-    st.subheader("📹 Live Camera Feed & Scanner")
+    st.subheader("📹 Live Camera Feed & Object Detection")
     
     sumber_video = st.radio("Pilih Sumber Video:", ("Video Demo di Repo (MP4)", "Kamera HP (URL Stream)"))
     
@@ -81,11 +93,11 @@ with col1:
         )
         st.caption("Gunakan aplikasi seperti 'IP Webcam' di Android.")
     
-    # Petunjuk UX agar user tahu urutan penggunaannya
+    # Tambahkan petunjuk UX agar user/juri tahu urutan penggunaannya
     st.info("💡 SOP: Matikan centang (uncheck) di bawah ini terlebih dahulu sebelum mengganti sumber video/URL.")
     
     run_scanner = st.checkbox("Nyalakan Scanner", value=False)
-    frame_window = st.image([], width='stretch')
+    frame_window = st.image([], width="stretch")
 
 with col2:
     st.subheader("📊 Statistik & Kontrol Data")
@@ -93,7 +105,6 @@ with col2:
     # Indikator Total Paket Real-time dari Database
     total_placeholder = st.empty()
     total_placeholder.metric(label="Total Paket di Database", value=get_total_packages())
-    
     # Placeholder untuk FPS tulisan kecil
     fps_small_display = st.empty() 
     
@@ -142,11 +153,11 @@ with col2:
     df_current = fetch_data_for_csv()
     table_placeholder.dataframe(df_current, width='stretch', hide_index=True)
     
-    st.write("🔍 **Kotak Intip Scanner (Otsu ROI)**")
+    st.write("🔍 **Kotak Intip Scanner (Otsu)**")
     debug_image_window = st.image([], width='stretch')
 
 # ==========================================
-# 3. CORE PROCESSING LOOP (OpenCV + ROI + PyZbar)
+# 3. CORE PROCESSING LOOP (OpenCV + Vision)
 # ==========================================
 
 # Kamera HANYA diinisialisasi jika checkbox menyala
@@ -154,27 +165,26 @@ if run_scanner:
     if sumber_video == "Kamera HP (URL Stream)":
         video_source = url_kamera_hp
     else:
+        #video_source = "putih.mp4" 
         video_source = "video-resi-jarak-30cm-terbaca-semua.mp4"
 
     cap = cv2.VideoCapture(video_source)
 
     # 💾 BUFFER MEMORI: Menyimpan resi yang sudah sukses dipindai di sesi ini
+    # agar tidak discan ulang secara terus menerus
     if 'resi_terscan_cache' not in st.session_state:
         st.session_state.resi_terscan_cache = set()
 
-    # Sapu bersih "cache visual"
+    # Sapu bersih "cache visual" atau sisa gambar hantu dari sesi sebelumnya 
+    # tepat sebelum video baru diputar
     debug_image_window.empty()
 
-    # Tentukan ukuran area pemindaian (Region of Interest / ROI)
-    # Sesuaikan angka rasio ini dengan posisi paket di konveyor pada videomu
-    # DISET FULL FRAME (100% Layar)
-    ROI_X_RATIO, ROI_Y_RATIO = 0.0, 0.0  # Mulai dari ujung kiri (0%) dan atas (0%)
-    ROI_W_RATIO, ROI_H_RATIO = 1.0, 1.0  # Lebar 100%, Tinggi 100%
-
-    simbol_logistik = [
-        ZBarSymbol.CODE128, ZBarSymbol.CODE39, ZBarSymbol.EAN13, 
-        ZBarSymbol.EAN8, ZBarSymbol.UPCA, ZBarSymbol.QRCODE
-    ]
+    # Tambahkan variabel penghitung frame
+    frame_count = 0 
+    
+    # Tambahkan frame skip (semakin besar angkanya, semakin ringan, tapi video sedikit patah)
+    # Angka 3 artinya kita hanya memproses 1 dari setiap 3 frame
+    frame_skip = 3
 
     while cap.isOpened():
         start_time = time.time() # Catat waktu mulai
@@ -183,80 +193,97 @@ if run_scanner:
         if not ret:
             break
 
-        # Perkecil resolusi frame agar lebih ringan (opsional jika terasa lag)
-        frame = cv2.resize(frame, (800, 600))
+        frame_count += 1
 
-        # Simulasi delay untuk video rekaman agar tidak terlalu cepat (opsional)
         if sumber_video == "Video Demo di Repo (MP4)":
-            time.sleep(0.02) 
-
-        h, w, _ = frame.shape
+            frame_skip = 30
         
-        # 1. Definisikan Kotak ROI berdasarkan persentase resolusi layar
-        x1 = int(w * ROI_X_RATIO)
-        y1 = int(h * ROI_Y_RATIO)
-        x2 = int(w * (ROI_X_RATIO + ROI_W_RATIO))
-        y2 = int(h * (ROI_Y_RATIO + ROI_H_RATIO))
-
-        # Gambar kotak ROI di frame utama (panduan operator)
-        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 255), 2)
-        cv2.putText(frame, "ZONA PINDAI BARCODE", (x1, y1 - 10), 
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
-
-        # 2. Potong frame (Crop) HANYA pada area kotak ROI
-        roi_frame = frame[y1:y2, x1:x2]
-
-        # 3. Preprocessing Gambar untuk ROI (Grayscale -> Blur -> Otsu)
-        gray_roi = cv2.cvtColor(roi_frame, cv2.COLOR_BGR2GRAY)
-        blurred_roi = cv2.GaussianBlur(gray_roi, (5, 5), 0)
-        _, thresholded_roi = cv2.threshold(blurred_roi, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-
-        # Tampilkan hasil hitam-putih dari pemotongan di UI
-        debug_image_window.image(thresholded_roi, caption="Kamera Intip Scanner (ROI Area)")
-
-        # 4. Baca Barcode
-        barcodes = pyzbar.decode(thresholded_roi, symbols=simbol_logistik)
-        if not barcodes:
-            # Fallback: jika Otsu Threshold gagal, coba baca gambar Grayscale biasa
-            barcodes = pyzbar.decode(gray_roi, symbols=simbol_logistik)
-
-        # --- PROSES BARCODE MULAI DI SINI ---
-        for barcode in barcodes:
-            barcode_data = barcode.data.decode("utf-8").strip()
+        # JIKA BUKAN KELIPATAN FRAME_SKIP, LEWATI DETEKSI!
+        if frame_count % frame_skip != 0:
+            continue
             
-            # Gambar kotak hijau mengelilingi letak barcode persis (relatif terhadap ROI)
-            (b_x, b_y, b_w, b_h) = barcode.rect
-            cv2.rectangle(frame, (x1 + b_x, y1 + b_y), (x1 + b_x + b_w, y1 + b_y + b_h), (0, 255, 0), 2)
+        if sumber_video == "Video Demo di Repo (MP4)":
+            time.sleep(0.01) # Kurangi delay sleep jika masih terlalu lambat
             
-            # 🔍 Validasi Panjang Karakter (Filter Port Code pendek)
-            if len(barcode_data) < 10:
-                continue
+            # Gunakan parameter ringan (imgsz=320) untuk video agar cepat
+            results = model(frame, conf=0.6, imgsz=320, verbose=False)
             
-            # 🛑 Validasi Duplikasi Sesi: Skip jika baru saja terscan
-            if barcode_data in st.session_state.resi_terscan_cache:
-                cv2.putText(frame, "SUDAH TERDATA", (x1 + b_x, y1 + b_y - 10), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
-                continue
-            
-            # 💾 Simpan ke Database jika lolos validasi
-            is_new = save_barcode_to_db(barcode_data)
-            
-            if is_new:
-                # Masukkan ke dalam buffer memori
-                st.session_state.resi_terscan_cache.add(barcode_data)
+        else:
+            # Ini akan berjalan jika sumbernya "Kamera HP (URL Stream)"
+            # Gunakan resolusi bawaan model
+            results = model(frame, verbose=False)
+    
+        for r in results:
+            boxes = r.boxes
+            for box in boxes:
+                x1, y1, x2, y2 = map(int, box.xyxy[0])
+                cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
                 
-                # Update metrik angka & tabel di UI Streamlit
-                total_placeholder.metric(label="Total Paket di Database", value=get_total_packages())
-                df_updated = fetch_data_for_csv()
-                table_placeholder.dataframe(df_updated, width='stretch', hide_index=True)
-            
-            # Indikator Sukses
-            cv2.putText(frame, f"SUCCESS: {barcode_data}", (x1 + b_x, y1 + b_y - 30), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2)
-        # --- PROSES BARCODE SELESAI ---
+                h, w, _ = frame.shape
+                pad = 20
+                crop_x1, crop_y1 = max(0, x1 - pad), max(0, y1 - pad)
+                crop_x2, crop_y2 = min(w, x2 + pad), min(h, y2 + pad)
+                
+                cropped_package = frame[crop_y1:crop_y2, crop_x1:crop_x2]
+                
+                if cropped_package.size > 0:
+                    gray = cv2.cvtColor(cropped_package, cv2.COLOR_BGR2GRAY)
+                    _, thresholded = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+                    
+                    debug_image_window.image(thresholded, caption="Kamera Intip Scanner")
 
-        # Hitung durasi dan kalkulasi FPS
+                    simbol_logistik = [
+                        ZBarSymbol.CODE128, ZBarSymbol.CODE39, ZBarSymbol.EAN13, 
+                        ZBarSymbol.EAN8, ZBarSymbol.UPCA, ZBarSymbol.QRCODE
+                    ]
+
+                    barcodes = pyzbar.decode(thresholded, symbols=simbol_logistik)
+                    
+                    if not barcodes:
+                        barcodes = pyzbar.decode(gray, symbols=simbol_logistik)
+                    
+                    # --- PROSES BARCODE MULAI DI SINI ---
+                    import re
+
+                    for barcode in barcodes:
+                        barcode_data = barcode.data.decode("utf-8").strip()
+                        
+                        # 🔍 1. Validasi Panjang Karakter (Filter Port Code)
+                        if len(barcode_data) < 10:
+                            # Ini Port Code, abaikan
+                            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
+                            continue
+                        
+                        # 🛑 2. Validasi Duplikasi: Jika resi sudah pernah terscan di sesi ini, LANGSUNG SKIP
+                        if barcode_data in st.session_state.resi_terscan_cache:
+                            # Beri penanda visual tipis bahwa paket ini sudah diproses (Optional)
+                            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 255), 2) # Kotak Kuning = Sudah Terdata
+                            cv2.putText(frame, "SUDAH TERDATA (SKIP)", (x1, y1 - 10), 
+                                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
+                            continue  # <--- Melompat langsung ke barcode/paket berikutnya
+                        
+                        # 💾 3. Jika resi BARU, masukkan ke database
+                        is_new = save_barcode_to_db(barcode_data)
+                        
+                        if is_new:
+                            # Masukkan ke dalam buffer memori agar tidak diproses lagi di frame selanjutnya
+                            st.session_state.resi_terscan_cache.add(barcode_data)
+                            
+                            # Update metrik angka & tabel di UI Streamlit
+                            total_placeholder.metric(label="Total Paket di Database", value=get_total_packages())
+                            df_updated = fetch_data_for_csv()
+                            table_placeholder.dataframe(df_updated, width='stretch', hide_index=True)
+                        
+                        # Efek Visual untuk Resi yang BARU SUKSES TERSCAN
+                        cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 0, 0), 4)
+                        cv2.putText(frame, f"SUCCESS: {barcode_data}", (x1, y1 - 30), 
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2)
+                    # --- PROSES BARCODE SELESAI ---
+
+        # Hitung durasi (berapa detik yang dihabiskan untuk memproses 1 frame)
         process_time = time.time() - start_time
+        
+        # Menghindari pembagian dengan nol
         if process_time > 0:
             fps = 1 / process_time
         else:
@@ -264,7 +291,7 @@ if run_scanner:
             
         fps_small_display.caption(f"Kecepatan deteksi: {fps:.2f} FPS")
         
-        # Render ke UI Utama
+        # Tampilkan ke UI
         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         frame_window.image(frame_rgb)
 

@@ -1,6 +1,5 @@
 import cv2
 import numpy as np
-from ultralytics import YOLO
 from pyzbar import pyzbar
 from pyzbar.pyzbar import ZBarSymbol
 import streamlit as st
@@ -11,10 +10,6 @@ import pandas as pd
 # ==========================================
 # 1. INISIALISASI DATABASE (SQLite)
 # ==========================================
-
-# Menghapus seluruh cache data dan cache resource di Streamlit
-# st.cache_data.clear()
-# st.cache_resource.clear()
 
 def init_db():
     conn = sqlite3.connect("logistik_gudang.db")
@@ -67,20 +62,13 @@ init_db()
 st.set_page_config(page_title="Smart Conveyor Scanner", layout="wide")
 
 st.title("📦 Smart Conveyor Barcode Scanner System")
-st.write("Sistem Pemindaian Paket Otomatis Berbasis AI (YOLOv8 + PyZbar + SQLite)")
-
-# Load Model YOLOv8 (Pastikan file best.pt hasil Roboflow ada di folder yang sama)
-@st.cache_resource
-def load_yolo_model():
-    return YOLO("best.pt")
-
-model = load_yolo_model()
+st.write("Sistem Pemindaian Paket Otomatis Berbasis Computer Vision (ROI + PyZbar + SQLite)")
 
 # Layout Kolom Dashboard
 col1, col2 = st.columns([2, 1])
 
 with col1:
-    st.subheader("📹 Live Camera Feed & Object Detection")
+    st.subheader("📹 Live Camera Feed & Scanner")
     
     sumber_video = st.radio("Pilih Sumber Video:", ("Video Demo di Repo (MP4)", "Kamera HP (URL Stream)"))
     
@@ -89,15 +77,15 @@ with col1:
         # Dummy IP
         url_kamera_hp = st.text_input(
             "🔗 Masukkan URL Video dari HP:", 
-            value="http://192.168.1.5:8080/video" 
+            value="http://192.168.1.4:8080/video" 
         )
         st.caption("Gunakan aplikasi seperti 'IP Webcam' di Android.")
     
-    # Tambahkan petunjuk UX agar user/juri tahu urutan penggunaannya
+    # Petunjuk UX agar user tahu urutan penggunaannya
     st.info("💡 SOP: Matikan centang (uncheck) di bawah ini terlebih dahulu sebelum mengganti sumber video/URL.")
     
     run_scanner = st.checkbox("Nyalakan Scanner", value=False)
-    frame_window = st.image([], width="stretch")
+    frame_window = st.image([], width='stretch')
 
 with col2:
     st.subheader("📊 Statistik & Kontrol Data")
@@ -105,6 +93,7 @@ with col2:
     # Indikator Total Paket Real-time dari Database
     total_placeholder = st.empty()
     total_placeholder.metric(label="Total Paket di Database", value=get_total_packages())
+    
     # Placeholder untuk FPS tulisan kecil
     fps_small_display = st.empty() 
     
@@ -153,149 +142,124 @@ with col2:
     df_current = fetch_data_for_csv()
     table_placeholder.dataframe(df_current, width='stretch', hide_index=True)
     
-    st.write("🔍 **Kotak Intip Scanner (Otsu)**")
+    st.write("🔍 **Kotak Intip Scanner (Otsu ROI)**")
     debug_image_window = st.image([], width='stretch')
 
 # ==========================================
-# 3. CORE PROCESSING LOOP (OpenCV + Vision)
+# 3. CORE PROCESSING LOOP (OpenCV + ROI + PyZbar)
 # ==========================================
 
-# Kamera HANYA diinisialisasi jika checkbox menyala
 if run_scanner:
     if sumber_video == "Kamera HP (URL Stream)":
         video_source = url_kamera_hp
     else:
-        #video_source = "putih.mp4" 
         video_source = "video-resi-jarak-30cm-terbaca-semua.mp4"
 
     cap = cv2.VideoCapture(video_source)
 
-    # 💾 BUFFER MEMORI: Menyimpan resi yang sudah sukses dipindai di sesi ini
-    # agar tidak discan ulang secara terus menerus
     if 'resi_terscan_cache' not in st.session_state:
         st.session_state.resi_terscan_cache = set()
 
-    # Sapu bersih "cache visual" atau sisa gambar hantu dari sesi sebelumnya 
-    # tepat sebelum video baru diputar
     debug_image_window.empty()
 
-    # Tambahkan variabel penghitung frame
-    frame_count = 0 
+    # Parameter Full Frame
+    ROI_X_RATIO, ROI_Y_RATIO = 0.0, 0.0  
+    ROI_W_RATIO, ROI_H_RATIO = 1.0, 1.0  
+
+    simbol_logistik = [
+        ZBarSymbol.CODE128, ZBarSymbol.CODE39, ZBarSymbol.EAN13, 
+        ZBarSymbol.EAN8, ZBarSymbol.UPCA, ZBarSymbol.QRCODE
+    ]
+
+    frame_count = 0
+    # JALANKAN PYZBAR SETIAP 3 FRAME (Ubah ke 4 atau 5 jika masih kurang lancar)
+    process_every_n_frames = 5
     
-    # Tambahkan frame skip (semakin besar angkanya, semakin ringan, tapi video sedikit patah)
-    # Angka 3 artinya kita hanya memproses 1 dari setiap 3 frame
-    frame_skip = 3
+    # Variabel untuk mengingat kotak hijau agar tidak berkedip (flicker)
+    last_detected_boxes = []
 
     while cap.isOpened():
-        start_time = time.time() # Catat waktu mulai
+        start_time = time.time()
         ret, frame = cap.read()
         
         if not ret:
             break
 
         frame_count += 1
+        h, w, _ = frame.shape
 
-        if sumber_video == "Video Demo di Repo (MP4)":
-            frame_skip = 30
-        
-        # JIKA BUKAN KELIPATAN FRAME_SKIP, LEWATI DETEKSI!
-        if frame_count % frame_skip != 0:
-            continue
-            
-        if sumber_video == "Video Demo di Repo (MP4)":
-            time.sleep(0.01) # Kurangi delay sleep jika masih terlalu lambat
-            
-            # Gunakan parameter ringan (imgsz=320) untuk video agar cepat
-            results = model(frame, conf=0.6, imgsz=320, verbose=False)
-            
-        else:
-            # Ini akan berjalan jika sumbernya "Kamera HP (URL Stream)"
-            # Gunakan resolusi bawaan model
-            results = model(frame, verbose=False)
-    
-        for r in results:
-            boxes = r.boxes
-            for box in boxes:
-                x1, y1, x2, y2 = map(int, box.xyxy[0])
-                cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+        x1 = int(w * ROI_X_RATIO)
+        y1 = int(h * ROI_Y_RATIO)
+        x2 = int(w * (ROI_X_RATIO + ROI_W_RATIO))
+        y2 = int(h * (ROI_Y_RATIO + ROI_H_RATIO))
+
+        # --- LOGIKA FRAME SKIPPING ---
+        # Hanya jalankan deteksi PyZbar yang berat di kelipatan 'process_every_n_frames'
+        if frame_count % process_every_n_frames == 0:
+            roi_frame = frame[y1:y2, x1:x2]
+            gray_roi = cv2.cvtColor(roi_frame, cv2.COLOR_BGR2GRAY)
+            blurred_roi = cv2.GaussianBlur(gray_roi, (5, 5), 0)
+            _, thresholded_roi = cv2.threshold(blurred_roi, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+
+            debug_image_window.image(thresholded_roi, caption="Kamera Intip Scanner (ROI Area)", width='stretch')
+
+            barcodes = pyzbar.decode(thresholded_roi, symbols=simbol_logistik)
+            if not barcodes:
+                barcodes = pyzbar.decode(gray_roi, symbols=simbol_logistik)
+
+            # Kosongkan memory kotak lama, ganti dengan kotak baru di frame ini
+            last_detected_boxes = []
+
+            for barcode in barcodes:
+                barcode_data = barcode.data.decode("utf-8").strip()
                 
-                h, w, _ = frame.shape
-                pad = 20
-                crop_x1, crop_y1 = max(0, x1 - pad), max(0, y1 - pad)
-                crop_x2, crop_y2 = min(w, x2 + pad), min(h, y2 + pad)
+                if len(barcode_data) < 10:
+                    continue
                 
-                cropped_package = frame[crop_y1:crop_y2, crop_x1:crop_x2]
+                (b_x, b_y, b_w, b_h) = barcode.rect
                 
-                if cropped_package.size > 0:
-                    gray = cv2.cvtColor(cropped_package, cv2.COLOR_BGR2GRAY)
-                    _, thresholded = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-                    
-                    debug_image_window.image(thresholded, caption="Kamera Intip Scanner")
+                # Cek apakah sudah pernah didata
+                is_duplicate = barcode_data in st.session_state.resi_terscan_cache
+                
+                if not is_duplicate:
+                    is_new = save_barcode_to_db(barcode_data)
+                    if is_new:
+                        st.session_state.resi_terscan_cache.add(barcode_data)
+                        total_placeholder.metric(label="Total Paket di Database", value=get_total_packages())
+                        df_updated = fetch_data_for_csv()
+                        table_placeholder.dataframe(df_updated, width='stretch', hide_index=True)
 
-                    simbol_logistik = [
-                        ZBarSymbol.CODE128, ZBarSymbol.CODE39, ZBarSymbol.EAN13, 
-                        ZBarSymbol.EAN8, ZBarSymbol.UPCA, ZBarSymbol.QRCODE
-                    ]
+                # Simpan posisi kotak untuk digambar ke frame (termasuk frame yang di-skip)
+                last_detected_boxes.append({
+                    'data': barcode_data,
+                    'rect': (x1 + b_x, y1 + b_y, b_w, b_h),
+                    'is_duplicate': is_duplicate
+                })
 
-                    barcodes = pyzbar.decode(thresholded, symbols=simbol_logistik)
-                    
-                    if not barcodes:
-                        barcodes = pyzbar.decode(gray, symbols=simbol_logistik)
-                    
-                    # --- PROSES BARCODE MULAI DI SINI ---
-                    import re
+        # --- MENGGAMBAR KOTAK (Dijalankan di SETIAP frame) ---
+        for box in last_detected_boxes:
+            b_x, b_y, b_w, b_h = box['rect']
+            barcode_data = box['data']
+            
+            if box['is_duplicate']:
+                cv2.rectangle(frame, (b_x, b_y), (b_x + b_w, b_y + b_h), (0, 255, 255), 2)
+                cv2.putText(frame, "SUDAH TERDATA", (b_x, b_y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
+            else:
+                cv2.rectangle(frame, (b_x, b_y), (b_x + b_w, b_y + b_h), (0, 255, 0), 2)
+                cv2.putText(frame, f"SUCCESS: {barcode_data}", (b_x, b_y - 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
 
-                    for barcode in barcodes:
-                        barcode_data = barcode.data.decode("utf-8").strip()
-                        
-                        # 🔍 1. Validasi Panjang Karakter (Filter Port Code)
-                        if len(barcode_data) < 10:
-                            # Ini Port Code, abaikan
-                            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
-                            continue
-                        
-                        # 🛑 2. Validasi Duplikasi: Jika resi sudah pernah terscan di sesi ini, LANGSUNG SKIP
-                        if barcode_data in st.session_state.resi_terscan_cache:
-                            # Beri penanda visual tipis bahwa paket ini sudah diproses (Optional)
-                            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 255), 2) # Kotak Kuning = Sudah Terdata
-                            cv2.putText(frame, "SUDAH TERDATA (SKIP)", (x1, y1 - 10), 
-                                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
-                            continue  # <--- Melompat langsung ke barcode/paket berikutnya
-                        
-                        # 💾 3. Jika resi BARU, masukkan ke database
-                        is_new = save_barcode_to_db(barcode_data)
-                        
-                        if is_new:
-                            # Masukkan ke dalam buffer memori agar tidak diproses lagi di frame selanjutnya
-                            st.session_state.resi_terscan_cache.add(barcode_data)
-                            
-                            # Update metrik angka & tabel di UI Streamlit
-                            total_placeholder.metric(label="Total Paket di Database", value=get_total_packages())
-                            df_updated = fetch_data_for_csv()
-                            table_placeholder.dataframe(df_updated, width='stretch', hide_index=True)
-                        
-                        # Efek Visual untuk Resi yang BARU SUKSES TERSCAN
-                        cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 0, 0), 4)
-                        cv2.putText(frame, f"SUCCESS: {barcode_data}", (x1, y1 - 30), 
-                                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2)
-                    # --- PROSES BARCODE SELESAI ---
-
-        # Hitung durasi (berapa detik yang dihabiskan untuk memproses 1 frame)
+        # Hitung durasi FPS
         process_time = time.time() - start_time
-        
-        # Menghindari pembagian dengan nol
         if process_time > 0:
             fps = 1 / process_time
         else:
             fps = 0
             
-        fps_small_display.caption(f"Kecepatan deteksi: {fps:.2f} FPS")
+        fps_small_display.caption(f"Kecepatan: {fps:.2f} FPS")
         
-        # Tampilkan ke UI
         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        frame_window.image(frame_rgb)
+        frame_window.image(frame_rgb, width='stretch')
 
     cap.release()
 else:
-    # Menampilkan pesan standby ketika checkbox dimatikan
     st.write("⏸️ Scanner dalam keadaan standby. Silakan pilih sumber video dan centang 'Nyalakan Scanner'.")
